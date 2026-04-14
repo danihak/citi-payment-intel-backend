@@ -77,6 +77,11 @@ class Command(BaseCommand):
     help = 'Seed 50+ rich demo incidents for Citi presentation'
 
     def handle(self, *args, **options):
+        # Skip if already seeded — prevents data loss on container restart
+        if Incident.objects.count() >= 10:
+            self.stdout.write('Demo data already exists — skipping seed.')
+            return
+
         self.stdout.write('Seeding demo data...')
 
         RailHealthSnapshot.objects.all().delete()
