@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.11-slim-bookworm
 
 WORKDIR /app
 
@@ -9,4 +9,4 @@ COPY . .
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "python manage.py migrate && python -c \"import config.asgi; print('ASGI OK')\" && gunicorn config.asgi:application -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:${PORT:-8000} --log-level debug 2>&1"]
+CMD ["sh", "-c", "python manage.py migrate 2>&1 && python manage.py runserver 0.0.0.0:${PORT:-8000} 2>&1"]
