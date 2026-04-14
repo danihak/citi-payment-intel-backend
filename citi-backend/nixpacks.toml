@@ -1,8 +1,5 @@
-[phases.setup]
-nixPkgs = ["python311", "postgresql"]
-
 [phases.install]
-cmds = ["pip install -r requirements.txt"]
+cmds = ["python -m pip install -r requirements.txt"]
 
 [start]
-cmd = "daphne config.asgi:application --port $PORT --bind 0.0.0.0"
+cmd = "python manage.py migrate && python manage.py seed_demo && daphne config.asgi:application --port $PORT --bind 0.0.0.0"
