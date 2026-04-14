@@ -1,5 +1,8 @@
 FROM python:3.11-slim-bookworm
 
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
 WORKDIR /app
 
 COPY requirements.txt .
@@ -9,4 +12,4 @@ COPY . .
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "python manage.py migrate 2>&1 && python manage.py runserver 0.0.0.0:${PORT:-8000} 2>&1"]
+CMD ["sh", "-c", "python manage.py migrate && python manage.py runserver 0.0.0.0:${PORT:-8000}"]
