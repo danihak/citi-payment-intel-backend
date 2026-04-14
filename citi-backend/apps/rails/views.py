@@ -47,3 +47,14 @@ class TriggerPollView(APIView):
         from agents.rail_monitor import run
         task = run.delay()
         return Response({'task_id': task.id, 'status': 'triggered'})
+
+
+class SeedDataView(APIView):
+    """POST /api/v1/rails/seed/ — reseed demo data on demand."""
+
+    def post(self, request):
+        from django.core.management import call_command
+        from io import StringIO
+        out = StringIO()
+        call_command('seed_demo', stdout=out)
+        return Response({'status': 'seeded', 'output': out.getvalue()})
