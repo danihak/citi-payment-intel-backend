@@ -88,7 +88,7 @@ class Command(BaseCommand):
         # Rail health history — 7 days of data
         rails_config = {'UPI': 99.4, 'IMPS': 98.9, 'RTGS': 99.8, 'NEFT': 99.6, 'NACH': 99.1}
         for rail, baseline in rails_config.items():
-            for i in range(480):
+            for i in range(60):
                 ts = now - timedelta(seconds=30 * (480 - i))
                 # Simulate degradations at specific windows
                 if rail == 'UPI' and 60 <= i <= 100:
