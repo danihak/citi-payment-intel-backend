@@ -76,6 +76,88 @@ REROUTING_MAP = {
 class Command(BaseCommand):
     help = 'Seed 50+ rich demo incidents for Citi presentation'
 
+    # Dip rate ranges by severity — used by _create_incident_dip
+    DIP_RANGES = {
+        'critical': (60, 75, 'down'),       # severe outage
+        'high':     (78, 88, 'degraded'),   # significant degradation
+        'medium':   (85, 92, 'degraded'),   # noticeable degradation
+        'low':      (92, 96, 'healthy'),    # minor blip — still reads healthy on cards
+    }
+
+    def _create_incident_dip(self, rail, baseline, detected_at, resolved_at, severity, classification):
+        """Generate ~30 snapshots showing the dip pattern for an incident.
+
+        Pattern: 5 pre-incident baseline snapshots, ~20 during-incident dip snapshots
+        with ramp-down/plateau/ramp-up shape, 5 post-recovery baseline snapshots.
+
+        FALSE_POSITIVE incidents get a much smaller, briefer blip — that's the whole
+        point of the classification (the system saw an alert but the rail was fine).
+        """
+        if classification == 'FALSE_POSITIVE':
+            dip_min, dip_max, dip_status = 93, 97, 'healthy'
+        else:
+            dip_min, dip_max, dip_status = self.DIP_RANGES.get(severity, (90, 95, 'degraded'))
+
+        end_at = resolved_at if resolved_at else detected_at + timedelta(minutes=20)
+        duration_s = max((end_at - detected_at).total_seconds(), 60)
+
+        snapshots_to_create = []
+
+        # 5 pre-incident snapshots — baseline at -5, -4, -3, -2, -1 min
+        for offset_min in [5, 4, 3, 2, 1]:
+            ts = detected_at - timedelta(minutes=offset_min)
+            rate = round(baseline + random.uniform(-0.5, 0.3), 2)
+            snapshots_to_create.append((ts, rate, 'healthy'))
+
+        # 20 during-incident snapshots, distributed across the duration
+        # i=0..1 ramp down, i=18..19 ramp up, middle stays at dip
+        for i in range(20):
+            ts = detected_at + timedelta(seconds=duration_s * i / 19)
+            if i < 2:
+                # Ramp down from baseline to dip
+                t = (i + 1) / 2  # 0.5, 1.0
+                rate_target = baseline + (dip_min + dip_max) / 2 * t - baseline * t
+                rate = round(rate_target + random.uniform(-1, 1.5), 2)
+            elif i >= 18 and resolved_at:
+                # Ramp up from dip to baseline (only for resolved incidents)
+                t = (i - 17) / 2  # 0.5, 1.0
+                mid_dip = (dip_min + dip_max) / 2
+                rate = round(mid_dip + (baseline - mid_dip) * t + random.uniform(-1, 1), 2)
+            else:
+                # Plateau at the dip level
+                rate = round(random.uniform(dip_min, dip_max), 2)
+
+            # Clamp + status
+            rate = max(50.0, min(100.0, rate))
+            if rate < 80:
+                status = 'down'
+            elif rate < 95:
+                status = 'degraded'
+            else:
+                status = dip_status
+
+            snapshots_to_create.append((ts, rate, status))
+
+        # 5 post-recovery snapshots — only if resolved
+        if resolved_at:
+            for offset_min in [1, 2, 3, 4, 5]:
+                ts = end_at + timedelta(minutes=offset_min)
+                rate = round(baseline + random.uniform(-0.5, 0.3), 2)
+                snapshots_to_create.append((ts, rate, 'healthy'))
+
+        # Persist
+        for ts, rate, status in snapshots_to_create:
+            latency = random.randint(250, 450) if status == 'healthy' else random.randint(700, 2500)
+            tpm = random.randint(12000, 16000) if rail == 'UPI' else random.randint(2000, 5000)
+            RailHealthSnapshot.objects.create(
+                rail_name=rail, success_rate=rate,
+                latency_ms=latency,
+                transactions_per_min=tpm,
+                status=status, error_rate=round(100 - rate, 2),
+                snapshot_at=ts,
+                raw_data={'source': 'seed', 'incident_dip': True, 'severity': severity},
+            )
+
     def add_arguments(self, parser):
         parser.add_argument(
             '--force',
@@ -163,6 +245,22 @@ class Command(BaseCommand):
                 historical_match=hist,
                 detected_at=detected, resolved_at=resolved_at,
             )
+
+            # Per-incident dip snapshots — without these, the IncidentDetail chart
+            # shows whatever the rail is doing right now, which for a resolved
+            # incident from 2h ago is just a flat baseline. The classifier reasoning
+            # claims a degradation happened, but the visual chart contradicts it.
+            #
+            # Skip the two currently-active incidents on UPI/IMPS — those are
+            # already covered by the live snapshot loop in the recent 30-min window
+            # and we don't want to double-stamp.
+            covered_by_live_loop = (
+                hours_ago == 0 and
+                rail in ('UPI', 'IMPS') and
+                status in ('active', 'investigating')
+            )
+            if not covered_by_live_loop:
+                self._create_incident_dip(rail, rails_config[rail], detected, resolved_at, sev, cls)
 
             # Agent runs for all incidents
             AgentRun.objects.create(incident=inc, agent_type='rail_monitor', status='completed',

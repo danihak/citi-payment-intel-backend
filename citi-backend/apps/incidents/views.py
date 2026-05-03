@@ -56,6 +56,63 @@ class IncidentResolveView(APIView):
         return Response({'status': 'resolved', 'resolved_at': incident.resolved_at.isoformat()})
 
 
+class IncidentSnapshotHistoryView(APIView):
+    """GET /api/v1/incidents/{id}/snapshot-history/ — snapshots in the incident's time window.
+
+    Unlike the generic /api/v1/rails/{rail}/history/ endpoint (which returns the
+    last 50 snapshots regardless of incident timing), this one returns snapshots
+    specifically around the incident in question:
+      - From detected_at - 6 minutes (to show baseline before the dip)
+      - To resolved_at + 6 minutes if resolved, or 'now' if still active
+
+    The chart on IncidentDetail uses this so a resolved incident from 2 hours
+    ago shows its actual dip pattern, not whatever the rail is doing right now.
+    """
+
+    def get(self, request, pk):
+        from datetime import timedelta
+        from django.utils import timezone
+        from apps.rails.models import RailHealthSnapshot
+
+        try:
+            incident = Incident.objects.get(id=pk)
+        except Incident.DoesNotExist:
+            return Response({'error': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        start = incident.detected_at - timedelta(minutes=6)
+        end = (incident.resolved_at + timedelta(minutes=6)) if incident.resolved_at else timezone.now()
+
+        snapshots = RailHealthSnapshot.objects.filter(
+            rail_name=incident.rail_name,
+            snapshot_at__gte=start,
+            snapshot_at__lte=end,
+        ).order_by('snapshot_at')
+
+        # Cap at 120 to avoid pathological cases
+        snapshot_data = [
+            {
+                'rail_name': s.rail_name,
+                'success_rate': float(s.success_rate),
+                'latency_ms': s.latency_ms,
+                'transactions_per_min': s.transactions_per_min,
+                'status': s.status,
+                'error_rate': float(s.error_rate),
+                'snapshot_at': s.snapshot_at.isoformat(),
+            }
+            for s in snapshots[:120]
+        ]
+
+        return Response({
+            'incident_id': str(incident.id),
+            'rail_name': incident.rail_name,
+            'detected_at': incident.detected_at.isoformat(),
+            'resolved_at': incident.resolved_at.isoformat() if incident.resolved_at else None,
+            'window_start': start.isoformat(),
+            'window_end': end.isoformat(),
+            'snapshots': snapshot_data,
+        })
+
+
 class SimulateIncidentView(APIView):
     """POST /api/v1/incidents/simulate/ — trigger a synthetic incident (demo only).
 
