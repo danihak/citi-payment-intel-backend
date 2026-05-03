@@ -5,4 +5,4 @@ cmds = [
 ]
 
 [start]
-cmd = "python manage.py migrate && python manage.py seed_demo && daphne config.asgi:application --port $PORT --bind 0.0.0.0"
+cmd = "python manage.py migrate && python manage.py seed_demo --force && daphne config.asgi:application --port $PORT --bind 0.0.0.0"

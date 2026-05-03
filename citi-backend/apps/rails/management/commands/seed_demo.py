@@ -14,7 +14,7 @@ INCIDENTS_DATA = [
     ('UPI',  'NPCI_SIDE',    91, 'critical',  'resolved',      72, 195, 'UPI degradation — NPCI infrastructure overload (April 12 pattern)', 'Rapid drop 99.4%→71.3% in 8 min. Latency 2,100ms (7.4x baseline). All PSP banks affected simultaneously. Check Transaction Status API flood pattern detected.', 'April 12, 2025 — UPI — NPCI_SIDE (5-hour outage, ₹2,400 Cr impacted)'),
     ('IMPS', 'BANK_SIDE',    78, 'high',      'resolved',      68, 90,  'IMPS degradation — Citi internal switch failover', 'Gradual decline 98.9%→89.2% over 15 min. Only Citi transactions affected — other PSPs normal. Consistent with internal switch failover.', 'March 26, 2025 — BANK_SIDE (switch failover)'),
     ('RTGS', 'FALSE_POSITIVE',88,'low',       'resolved',      65, 2,   'RTGS anomaly — classified as false positive', 'Single data point triggered alert. Self-corrected in 2 min. NPCI status page normal. Monitoring sensor artifact.', 'November 22, 2024 — FALSE_POSITIVE'),
-    ('UPI',  'UNKNOWN',      52, 'medium',    'investigating',  0, 0,   'UPI 93.7% — pattern does not match known signatures', 'Moderate decline to 93.7%. Latency 680ms. No clear NPCI or bank-side signature. Manual review recommended.', ''),
+    ('UPI',  'NPCI_SIDE',    94, 'critical',  'active',         0, 0,   'UPI down — NPCI Check Transaction Status API overload', 'Rapid success-rate drop 99.4%→71.3% within 8 minutes. Latency at 1,850ms (6.5x baseline). Pattern matches April 12 2025 NPCI infrastructure overload — multiple PSPs flooding Check Transaction Status API. Rerouting to IMPS recommended for non-time-sensitive flows.', 'April 12, 2025 — UPI — NPCI_SIDE (5-hour outage, ₹2,400 Cr impacted)'),
     ('NEFT', 'NPCI_SIDE',    85, 'high',      'resolved',      60, 120, 'NEFT settlement delays — NPCI batch processing issue', 'NEFT success rate dropped to 82.1%. Settlement batches delayed by 45+ minutes. NPCI advisory confirmed maintenance overrun.', 'January 14, 2025 — IMPS — NPCI_SIDE'),
     ('UPI',  'BANK_SIDE',    72, 'medium',    'resolved',      55, 60,  'UPI failures — Citi VPA validation service timeout', 'UPI failure rate elevated to 8.4%. Traced to internal VPA validation microservice timeout. Other banks unaffected.', 'March 26, 2025 — BANK_SIDE'),
     ('NACH', 'NPCI_SIDE',    89, 'critical',  'resolved',      48, 240, 'NACH bulk debit failure — NPCI mandate registry down', 'NACH success rate collapsed to 34.2%. All corporate bulk debit mandates failing. NPCI mandate registry unreachable. Salary disbursements and EMI collections affected.', 'October 8, 2024 — RTGS — NPCI_SIDE'),
@@ -76,41 +76,70 @@ REROUTING_MAP = {
 class Command(BaseCommand):
     help = 'Seed 50+ rich demo incidents for Citi presentation'
 
+    def add_arguments(self, parser):
+        parser.add_argument(
+            '--force',
+            action='store_true',
+            help='Wipe existing data and re-seed even if incidents already exist.',
+        )
+
     def handle(self, *args, **options):
-        # Skip if already seeded — prevents data loss on container restart
-        if Incident.objects.count() >= 10:
-            self.stdout.write('Demo data already exists — skipping seed.')
+        force = options.get('force', False)
+
+        # Skip if already seeded unless --force — prevents data loss on container restart
+        if not force and Incident.objects.count() >= 10:
+            self.stdout.write('Demo data already exists — skipping seed (pass --force to refresh).')
             return
 
-        self.stdout.write('Seeding demo data...')
+        if force:
+            self.stdout.write('--force set: wiping and re-seeding all demo data...')
+        else:
+            self.stdout.write('Seeding demo data...')
 
+        # Wipe all demo tables (including violations + comms drafts that earlier code missed)
         RailHealthSnapshot.objects.all().delete()
-        Incident.objects.all().delete()
+        Incident.objects.all().delete()  # cascades to AgentRun, ReroutingRecommendation, CommunicationDraft
         ApiComplianceMetric.objects.all().delete()
+        ComplianceViolation.objects.all().delete()
 
         now = timezone.now()
 
-        # Rail health history — 7 days of data
+        # Rail health history — last 30 minutes (60 snapshots × 30s = 30min)
+        # Final state must be self-consistent with the active incidents seeded below:
+        #   UPI:  active CRITICAL incident      → cliff at right edge, latest snapshot DOWN ~71%
+        #   IMPS: active INVESTIGATING incident → degraded ~91% over recent window
+        #   RTGS, NEFT, NACH: healthy throughout
         rails_config = {'UPI': 99.4, 'IMPS': 98.9, 'RTGS': 99.8, 'NEFT': 99.6, 'NACH': 99.1}
+        SNAPSHOTS_PER_RAIL = 60  # 30 min @ 30s intervals
         for rail, baseline in rails_config.items():
-            for i in range(60):
-                ts = now - timedelta(seconds=30 * (480 - i))
-                # Simulate degradations at specific windows
-                if rail == 'UPI' and 60 <= i <= 100:
-                    rate = round(random.uniform(65, 78), 2); status = 'down'
-                elif rail == 'UPI' and 100 <= i <= 130:
-                    rate = round(random.uniform(82, 91), 2); status = 'degraded'
-                elif rail == 'IMPS' and 150 <= i <= 180:
-                    rate = round(random.uniform(87, 93), 2); status = 'degraded'
-                elif rail == 'UPI' and 300 <= i <= 340:
-                    rate = round(random.uniform(55, 70), 2); status = 'down'
+            for i in range(SNAPSHOTS_PER_RAIL):
+                # i=0 is oldest, i=59 is newest. Newest snapshot = "now".
+                ts = now - timedelta(seconds=30 * (SNAPSHOTS_PER_RAIL - 1 - i))
+
+                # UPI cliff in last ~4 minutes (i >= 52): drops from healthy to DOWN ~71%
+                if rail == 'UPI' and i >= 52:
+                    rate = round(random.uniform(68, 74), 2)
+                    status = 'down'
+                # UPI dipping in the 2 minutes before that (i 48-51): degrading
+                elif rail == 'UPI' and i >= 48:
+                    rate = round(random.uniform(82, 91), 2)
+                    status = 'degraded'
+                # IMPS intermittent degradation across the last ~10 min (i >= 40)
+                elif rail == 'IMPS' and i >= 40:
+                    rate = round(random.uniform(89, 93), 2)
+                    status = 'degraded'
+                # All other windows: healthy with mild noise around baseline
                 else:
-                    rate = round(baseline + random.uniform(-0.5, 0.3), 2); status = 'healthy'
+                    rate = round(baseline + random.uniform(-0.5, 0.3), 2)
+                    status = 'healthy'
+
+                latency = random.randint(250, 450) if status == 'healthy' else random.randint(700, 2500)
                 RailHealthSnapshot.objects.create(
                     rail_name=rail, success_rate=rate,
-                    latency_ms=random.randint(250, 450) if status == 'healthy' else random.randint(700, 2500),
+                    latency_ms=latency,
                     transactions_per_min=random.randint(12000, 16000) if rail == 'UPI' else random.randint(2000, 5000),
                     status=status, error_rate=round(100 - rate, 2),
+                    snapshot_at=ts,
                     raw_data={'source': 'seed', 'index': i},
                 )
         self.stdout.write(f'  Rail snapshots: {RailHealthSnapshot.objects.count()}')
@@ -181,10 +210,20 @@ class Command(BaseCommand):
                     duration_ms=random.randint(3500, 5500),
                     completed_at=detected + timedelta(seconds=150),
                 )
+                # When classification is UNKNOWN or confidence is low, fall back to
+                # 'Under Investigation' in the heading so we never ship awkward copy
+                # like 'IMPS Alert — Unknown — Internal Briefing'.
+                if cls == 'UNKNOWN' or conf < 60:
+                    classification_label = 'Under Investigation'
+                    classification_phrase = 'still under investigation'
+                else:
+                    classification_label = cls.replace("_", " ").title()
+                    classification_phrase = cls.replace("_", " ").lower()
+
                 CommunicationDraft.objects.create(
                     incident=inc, audience='client_services',
-                    subject_line=f'{rail} Alert — {cls.replace("_", " ").title()} — Internal Briefing',
-                    draft_text=f'Our AI monitoring has classified this {rail} incident as {cls.replace("_", " ").lower()} with {conf}% confidence. {reasoning[:200]}... Rerouting to alternative rails where applicable. Updates every 30 minutes.',
+                    subject_line=f'{rail} Alert — {classification_label} — Internal Briefing',
+                    draft_text=f'Our AI monitoring has classified this {rail} incident as {classification_phrase} with {conf}% confidence. {reasoning[:200]}... Rerouting to alternative rails where applicable. Updates every 30 minutes.',
                     status=draft_status,
                     approved_by='ops_lead' if draft_status == 'approved' else '',
                     approved_at=detected + timedelta(minutes=10) if draft_status == 'approved' else None,

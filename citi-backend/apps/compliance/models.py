@@ -1,5 +1,6 @@
 import uuid
 from django.db import models
+from django.utils import timezone
 
 
 class ApiComplianceMetric(models.Model):
@@ -20,7 +21,7 @@ class ApiComplianceMetric(models.Model):
     calls_last_hour = models.IntegerField(default=0)
     violation_count = models.IntegerField(default=0)
     is_compliant = models.BooleanField(default=True)
-    measured_at = models.DateTimeField(auto_now_add=True)
+    measured_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
         ordering = ['-measured_at']
@@ -50,7 +51,7 @@ class ComplianceViolation(models.Model):
     tps_limit = models.DecimalField(max_digits=8, decimal_places=2)
     severity = models.CharField(max_length=10, choices=SEVERITY_CHOICES)
     description = models.TextField()
-    occurred_at = models.DateTimeField(auto_now_add=True)
+    occurred_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
         ordering = ['-occurred_at']

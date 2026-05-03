@@ -1,5 +1,6 @@
 import uuid
 from django.db import models
+from django.utils import timezone
 
 
 class RailHealthSnapshot(models.Model):
@@ -25,7 +26,7 @@ class RailHealthSnapshot(models.Model):
     transactions_per_min = models.IntegerField(default=0)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='healthy')
     error_rate = models.DecimalField(max_digits=5, decimal_places=2, default=0.00)
-    snapshot_at = models.DateTimeField(auto_now_add=True)
+    snapshot_at = models.DateTimeField(default=timezone.now)
     raw_data = models.JSONField(default=dict)
 
     class Meta:

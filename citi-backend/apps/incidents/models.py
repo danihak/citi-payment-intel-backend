@@ -1,5 +1,6 @@
 import uuid
 from django.db import models
+from django.utils import timezone
 from apps.rails.models import RailHealthSnapshot
 
 
@@ -35,7 +36,7 @@ class Incident(models.Model):
     title = models.CharField(max_length=200, default='Payment rail degradation detected')
     classifier_reasoning = models.TextField(blank=True)
     historical_match = models.CharField(max_length=200, blank=True)
-    detected_at = models.DateTimeField(auto_now_add=True)
+    detected_at = models.DateTimeField(default=timezone.now)
     resolved_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
@@ -72,7 +73,7 @@ class AgentRun(models.Model):
     output_data = models.JSONField(default=dict)
     duration_ms = models.IntegerField(default=0)
     error_message = models.TextField(blank=True)
-    started_at = models.DateTimeField(auto_now_add=True)
+    started_at = models.DateTimeField(default=timezone.now)
     completed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
@@ -90,7 +91,7 @@ class ReroutingRecommendation(models.Model):
     confidence = models.DecimalField(max_digits=5, decimal_places=2, default=0.00)
     rationale = models.TextField()
     estimated_success_rate = models.DecimalField(max_digits=5, decimal_places=2, default=0.00)
-    created_at = models.DateTimeField(auto_now_add=True)
+    created_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
         ordering = ['-created_at']

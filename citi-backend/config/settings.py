@@ -93,6 +93,12 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'agents.compliance_watchdog.run',
         'schedule': 60.0,
     },
+    'demo-refresh-every-4h': {
+        # Re-seed demo data every 4 hours so timestamps stay relative to `now`.
+        # Without this, the dashboard ages from "10m ago" to "19d ago" over time.
+        'task': 'agents.demo_refresh.run',
+        'schedule': 4 * 60 * 60,  # 4 hours in seconds
+    },
 }
 
 # Anthropic

@@ -1,5 +1,6 @@
 import uuid
 from django.db import models
+from django.utils import timezone
 from apps.incidents.models import Incident
 
 
@@ -27,7 +28,7 @@ class CommunicationDraft(models.Model):
     status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='draft')
     approved_by = models.CharField(max_length=100, blank=True)
     approved_at = models.DateTimeField(null=True, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
+    created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
