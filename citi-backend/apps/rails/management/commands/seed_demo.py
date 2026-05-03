@@ -210,15 +210,25 @@ class Command(BaseCommand):
                     duration_ms=random.randint(3500, 5500),
                     completed_at=detected + timedelta(seconds=150),
                 )
-                # When classification is UNKNOWN or confidence is low, fall back to
-                # 'Under Investigation' in the heading so we never ship awkward copy
-                # like 'IMPS Alert — Unknown — Internal Briefing'.
+                # Use explicit labels per classification so acronyms stay capitalised.
+                # Naive .title() turns 'NPCI_SIDE' into 'Npci Side', which a banking
+                # reviewer instantly reads as broken — NPCI is a recognised acronym in
+                # this domain, the equivalent of FDIC or BIS, and must stay all-caps.
+                CLASSIFICATION_LABELS = {
+                    'NPCI_SIDE': ('NPCI-Side', 'NPCI-side'),
+                    'BANK_SIDE': ('Bank-Side', 'bank-side'),
+                    'FALSE_POSITIVE': ('False Positive', 'a false positive'),
+                    'UNKNOWN': ('Under Investigation', 'still under investigation'),
+                }
+                # Low-confidence non-UNKNOWN classifications also fall back to 'Under
+                # Investigation' so we never ship awkward copy like
+                # 'IMPS Alert — Unknown — Internal Briefing'.
                 if cls == 'UNKNOWN' or conf < 60:
-                    classification_label = 'Under Investigation'
-                    classification_phrase = 'still under investigation'
+                    classification_label, classification_phrase = CLASSIFICATION_LABELS['UNKNOWN']
                 else:
-                    classification_label = cls.replace("_", " ").title()
-                    classification_phrase = cls.replace("_", " ").lower()
+                    classification_label, classification_phrase = CLASSIFICATION_LABELS.get(
+                        cls, (cls.replace("_", "-").title(), cls.replace("_", "-").lower())
+                    )
 
                 CommunicationDraft.objects.create(
                     incident=inc, audience='client_services',
